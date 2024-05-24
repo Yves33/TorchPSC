@@ -31,6 +31,7 @@ default_show_pca=True           ## show PCA window
 default_use_sliders=True        ## use sliders for parameters
 
 ## signal preprocessing
+default_savgol=(9,2)            ## parameters for savgol filter
 default_scale_factor=-1.0       ## optional signal scaling, in case your scales are wrong use negative to get upward peaks!
 default_baseline_smooth=1.0     ## duration for baseline average
 default_instant_smooth=1        ## signal convolution for smoothing. ignored if <2
@@ -142,6 +143,7 @@ from glfwapp import GLFWapp
 
 ######################
 ## retifying methods
+lowpass_freqs=[0,1000,1500,2000,2500,3000,3500,4000,4500,5000]
 rectify_method_names=["keep","abs","rms",'clip+rms']
 class Rectify(IntEnum):
     keep=0          ## keep original signal
@@ -331,6 +333,7 @@ class PSCFrame:
                 current=exp.signal(default_search_channel,"V")[default_trace_id]
                 current=AnalogSignal(current.magnitude, units='pA', sampling_rate=current.sr)
             cls.name=exp.name
+            cls.filename=filename
         
         ## end awfull hack
         cls.sr=float(current.sr) ## make it float, don't bother with units
@@ -396,6 +399,11 @@ class PSCFrame:
                 high = fr*(1+bw) / nyq
                 i, u = butter(3, [low, high], btype='bandstop')
                 tmpsignal=lfilter(i, u, tmpsignal)'''
+            if self.p.lopass_filter:
+                cutoff=lowpass_freqs[self.p.lopass_filter]
+                from scipy.signal import butter, lfilter, freqz
+                b,a=butter(N=6, Wn=cutoff, fs=self.sr, btype='low', analog=False)
+                tmpsignal = lfilter(b, a, tmpsignal)
             if all([s>=2 for s in self.p.savgol_filter]) and self.p.savgol_filter[0]>self.p.savgol_filter[1]:
                 tmpsignal=savgol_filter(tmpsignal, *self.p.savgol_filter)
             self.gpu_signal=cp.array(tmpsignal).astype(wdtype)
@@ -441,15 +449,22 @@ class PSCFrame:
         ## https://groups.google.com/g/scipy-user/c/4zQMRAb1rsk/m/RzUrrhNY6ukJ
         #https://github.com/AMikroulis/xPSC-detection/blob/master/xPSC%20detection/xPSC_detection.py
         if self.flags & flag_convolve:
-            t_psc=cp.linspace(0,float(self.t_max),len(self.gpu_signal),dtype=cp.float32)
-            tau_1=self.p.conv_risetime/1000 ##*pq.ms,
-            tau_2=self.p.conv_decaytime/1000 ##*pq.ms,
-            Aprime = (tau_2/tau_1)**(tau_1/(tau_1-tau_2))
-            #Aprime = (tau_2**(tau_1/(tau_1-tau_2)))/tau_1 ## https://molecularbrain.biomedcentral.com/articles/10.1186/s13041-021-00847-x
-            self.template = 1./Aprime * (-cp.exp(-t_psc/tau_1) + cp.exp((-t_psc/tau_2))) #*int(2*int(p.upward)-1)
-            self.template/=cp.max(self.template)
-            H = cp.fft.fft(self.template)
-            self.gpu_convolved = cp.real(cp.fft.ifft(cp.fft.fft(self.gpu_rectified)*cp.conj(H)/(H*cp.conj(H) + self.p.llambda**2)))
+            if self.p.skip_convolution:
+                self.gpu_convolved=self.gpu_rectified.copy()
+                self.template=cp.linspace(0,float(self.t_max),len(self.gpu_signal),dtype=cp.float32)*0
+                ## adjust extraction
+                #self.p.psc_threshold=cp.min(self.gpu_convolved)+(cp.max(self.gpu_convolved)-cp.min(self.gpu_convolved))*0.5#2*float(cp.quantile(self.gpu_convolved,0.99))
+                self.p.psc_threshold=cp.max(self.gpu_convolved)
+            else:
+                t_psc=cp.linspace(0,float(self.t_max),len(self.gpu_signal),dtype=cp.float32)
+                tau_1=self.p.conv_risetime/1000 ##*pq.ms,
+                tau_2=self.p.conv_decaytime/1000 ##*pq.ms,
+                Aprime = (tau_2/tau_1)**(tau_1/(tau_1-tau_2))
+                #Aprime = (tau_2**(tau_1/(tau_1-tau_2)))/tau_1 ## https://molecularbrain.biomedcentral.com/articles/10.1186/s13041-021-00847-x
+                self.template = 1./Aprime * (-cp.exp(-t_psc/tau_1) + cp.exp((-t_psc/tau_2))) #*int(2*int(p.upward)-1)
+                self.template/=cp.max(self.template)
+                H = cp.fft.fft(self.template)
+                self.gpu_convolved = cp.real(cp.fft.ifft(cp.fft.fft(self.gpu_rectified)*cp.conj(H)/(H*cp.conj(H) + self.p.llambda**2)))
             self.threshold_hard=float(cp.quantile(self.gpu_convolved,0.999))
         self.flags=self.flags & ~flag_convolve ## clear rectify flag and return
 
@@ -543,11 +558,13 @@ class PSCFrame:
                                                 s[o+ttp:o+l],
                                                 bounds=([0., 0.0002, -20],   [2*max(s[o+ttp:o+l]), 0.040, 20])
                                                 )
+                self.psc_tau[i]=1000*popt[1]
+                self.psc_fiterr[i]=float(np.log10(1+np.sqrt(np.diag(pcov))[1]))
             except:
                 popt=[np.nan,np.nan]
                 pcov=[np.nan,np.nan]
-            self.psc_tau[i]=1000*popt[1]
-            self.psc_fiterr[i]=float(np.log10(1+np.sqrt(np.diag(pcov))[1]))
+                self.psc_tau[i]=np.nan
+                self.psc_fiterr[i]=np.nan
         self.psc_fiterr=cp.clip(self.psc_fiterr,cp.quantile(self.psc_fiterr,0.05),cp.quantile(self.psc_fiterr,0.95))
         self.lohifilters[Target.fiterr]=None
         self.lohifilters[Target.tau]=None
@@ -594,7 +611,7 @@ class PSCFrame:
 
     def psc_to_cpu(self):
         if len(self.psc_onsets)<1:
-            return np.array((0,16))
+            return np.array([])#np.array((0,16))
         #psc_fields=['onset_s','onset_t','onset_v','length_s','length_t','ttp_s','ttp_t','peak_s','peak_t','peak_v',\
         #'amp_v','area_v','halfwidth_t','sharpness','tau','fiterr','score']
         return cp.asnumpy(cp.array([
@@ -662,7 +679,7 @@ class PSCFrame:
                 cls.psc_scores=cp.array(pscs[:,16])           ## current sore, i.e the value of convolved data at peak
                 cls.psc_ttp=cp.array(pscs[:,5])               ## time to peak, in samples
                 cls.psc_peaks=cp.array(pscs[:,9])             ## current at peak
-                cls.psc_length=cp.array(pscs[:,3])            ## duration of each psc, in samples. shoerter than psc_duration when pscs are overlapping
+                cls.psc_length=cp.array(pscs[:,3])            ## duration of each psc, in samples. shorter than psc_duration when pscs are overlapping
                 cls.psc_amps=cp.array(pscs[:,10])
                 cls.psc_areas=cp.array(pscs[:,11])
                 cls.psc_halfwidth=cp.array(pscs[:,12])
@@ -699,7 +716,7 @@ class PSCFrame:
         postpoints=int(0.015*self.sr)
         evts=np.array([cp.asnumpy(self.gpu_rectified[o-prepoints:o+postpoints]) 
                        for o in self.psc_onsets ],dtype=np.float32)
-        with h5py.File(pathlib.Path(self.name).stem+'.hdf5', 'w') as f:
+        with h5py.File(pathlib.Path(self.filename).resolve().with_suffix('.hdf5'), 'w') as f:
             g=f.create_group(self.name)
             ## save arrays
             ## we save original signal (current), the two maskes (enabled and corrected).
@@ -745,7 +762,10 @@ class PSCFrame:
             g.attrs['info']=json.dumps(info)
 
     def _fit_avg_(self,normalize=True):
+        ## todo check if there are some events. return np.nan,np.nan
         m=self.psc_mask.astype(cp.bool_)
+        if np.sum(m)<1:
+            return np.nan, np.nan
         if not normalize:
             avg_data=cp.nanmean(self.psc_data[m],
                                      axis=0)
@@ -780,25 +800,47 @@ class PSCFrame:
     def summarize(self):
         pscs=cp.asnumpy(self.psc_to_cpu()).astype(np.float32)
         mask=cp.asnumpy(self.psc_mask.astype(cp.bool_)).astype(np.bool_)
-        r={}
-        r["SYN_evt_ampl_mean"]=np.nanmean(pscs[mask,c_amp_v])*pq.pA
-        r["SYN_evt_ampl_std"]=np.nanstd(pscs[mask,c_amp_v])*pq.pA
-        r["SYN_evt_peak"]=np.nanmean(pscs[mask,c_peak_v])*pq.pA
-        r["SYN_evt_inter"]=float(cp.nanmean(self.psc_inter[:-1]))*pq.s
-        ## todo. replace by nan when fit/psc is not complete
-        taumask=cp.asnumpy(self.psc_length==cp.max(self.psc_length)).astype(np.bool_)
-        r["SYN_evt_wtc_mean"]=np.nanmean(pscs[mask|taumask,c_tau])/1000*pq.s  ## this one may contain nan
-        r["SYN_evt_wtc_std"]=np.nanstd(pscs[mask|taumask,c_tau])/1000*pq.s    ## this one may contain nan
-        r["SYN_evt_overallfreq"]=np.sum(mask)/(self.t_max-self.t_min)
-        ttp,wtc=self._fit_avg_()
-        r["SYN_avgpsc_wtc"]=wtc * pq.s
-        r["SYN_avgpsc_ttp"]=ttp * pq.s
-        r["SYN_evt_fano"]=float(cp.std(self.psc_inter[:-1])/cp.mean(self.psc_inter[:-1]))
-        r["SYN_burst2psc_ratio"]=float(cp.sum(self.burst_counts)/cp.sum(self.psc_mask))
-        r["SYN_burst_content"]=float(cp.mean(self.burst_counts))
-        r["SYN_burst_dura"]=float(cp.mean(self.burst_onoffs[:,1]-self.burst_onoffs[:,0])/self.sr)*pq.s
-        r["SYN_burst_inter"]:float(cp.mean(cp.ediff1d(self.burst_onoffs[:,1])))*pq.s
-        r["SYN_burst_overallfreq"]=len(self.burst_onoffs[:,1])/(self.t_max-self.t_min)
+        if len(pscs[mask]):
+            r={}
+            r["SYN_evt_ampl_mean"]=np.nanmean(pscs[mask,c_amp_v])*pq.pA
+            r["SYN_evt_ampl_std"]=np.nanstd(pscs[mask,c_amp_v])*pq.pA
+            r["SYN_evt_peak"]=np.nanmean(pscs[mask,c_peak_v])*pq.pA
+            if len(self.psc_inter)>1:
+                r["SYN_evt_inter"]=float(cp.nanmean(self.psc_inter[:-1]))*pq.s
+            else:
+                r["SYN_evt_inter"]=np.nan*pq.s
+            ## todo. replace by nan when fit/psc is not complete
+            taumask=cp.asnumpy(self.psc_length==cp.max(self.psc_length)).astype(np.bool_)
+            r["SYN_evt_wtc_mean"]=np.nanmean(pscs[mask|taumask,c_tau])/1000*pq.s  ## this one may contain nan
+            r["SYN_evt_wtc_std"]=np.nanstd(pscs[mask|taumask,c_tau])/1000*pq.s    ## this one may contain nan
+            r["SYN_evt_overallfreq"]=np.sum(mask)/(self.t_max-self.t_min)
+            ttp,wtc=self._fit_avg_()
+            r["SYN_avgpsc_wtc"]=wtc * pq.s
+            r["SYN_avgpsc_ttp"]=ttp * pq.s
+            r["SYN_evt_fano"]=float(cp.std(self.psc_inter[:-1])/cp.mean(self.psc_inter[:-1]))
+            r["SYN_burst2psc_ratio"]=float(cp.sum(self.burst_counts)/cp.sum(self.psc_mask))
+            r["SYN_burst_content"]=float(cp.mean(self.burst_counts))
+            r["SYN_burst_dura"]=float(cp.mean(self.burst_onoffs[:,1]-self.burst_onoffs[:,0])/self.sr)*pq.s
+            r["SYN_burst_inter"]:float(cp.mean(cp.ediff1d(self.burst_onoffs[:,1])))*pq.s
+            r["SYN_burst_overallfreq"]=len(self.burst_onoffs[:,1])/(self.t_max-self.t_min)
+        else:
+            r={
+                'SYN_evt_ampl_mean': np.nan*pq.pA,
+                "SYN_evt_ampl_std":np.nan*pq.pA,
+                "syn_evt_peak":np.nan*pq.pA,
+                "SYN_evt_inter":np.nan*pq.s,
+                "SYN_evt_wtc_mean":np.nan*pq.s,
+                "SYN_evt_wtc_std":np.nan*pq.s,
+                "SYN_evt_overallfreq":0/pq.s,
+                "SYN_avgpsc_wtc":np.nan * pq.s,
+                "SYN_avgpsc_ttp":np.nan * pq.s,
+                "SYN_evt_fano":np.nan,
+                "SYN_burst2psc_ratio":np.nan,
+                "SYN_burst_content":0,
+                "SYN_burst_dura":0,
+                "SYN_burst_inter":np.nan*pq.s,
+                "SYN_burst_overallfreq":0/pq.s
+            }
         buffer=''
         for k,v in r.items():
             buffer+=f"{k}\tdimension\t{float(v)}\n"
@@ -818,7 +860,8 @@ class PSCapp(GLFWapp):
 
         ## signal processing parameters
         self.notch_filter=0
-        self.savgol_filter=(0,0)                      ## parameters for savgol
+        self.lopass_filter=0                          ## choice for lopass (0,1500,2000,2500,4000Hz)                    
+        self.savgol_filter=default_savgol             ## parameters for savgol
         self.scale_factor=default_scale_factor        ## optional signal scaling, in case your scales are wrong!
         self.baseline_smooth=default_baseline_smooth  ## duration for baseline average
         self.instant_smooth=default_instant_smooth    ## signal convolution for smoothing
@@ -826,6 +869,7 @@ class PSCapp(GLFWapp):
         self.rms_pts=default_rms_pts                  ## number of points for rms rectification
 
         ## signal convolution
+        self.skip_convolution=False                   ## by default, make a convolution
         self.conv_risetime=default_conv_risetime      ## rise time in msec
         self.conv_decaytime=default_conv_decaytime    ## decay time in msec
         self.llambda=default_llambda                  ## ??
@@ -933,6 +977,8 @@ class PSCapp(GLFWapp):
             imgui.text(f"FPS : {imgui.get_io().framerate:.1f}")
 
         if imgui.collapsing_header("Filters",imgui.TreeNodeFlags_.default_open):
+            changed,self.lopass_filter=imgui.combo('Low pass',self.lopass_filter,[str(i) for i in lowpass_freqs])
+            flags|=changed*(flag_preprocess|flag_rectify|flag_convolve|flag_extract|flag_filter)
             changed,self.notch_filter=imgui.combo('Band stop',self.notch_filter,['Disabled','50Hz','60Hz'])
             flags|=changed*(flag_preprocess|flag_rectify|flag_convolve|flag_extract|flag_filter)
             changed,self.savgol_filter=imgui.input_int2('Savgol (npts,deg)',self.savgol_filter)
@@ -955,6 +1001,8 @@ class PSCapp(GLFWapp):
 
         if imgui.collapsing_header("Convolution",imgui.TreeNodeFlags_.default_open):
             ## convolution
+            changed, self.skip_convolution=imgui.checkbox("Skip convolution",self.skip_convolution)
+            flags|=changed*(flag_convolve|flag_extract|flag_filter)
             changed,self.conv_risetime=self.slider_float("PSC rise time (ms)",self.conv_risetime,0.01,10)
             flags|=changed*(flag_convolve|flag_extract|flag_filter)
             changed,self.conv_decaytime=self.slider_float("PSC decay time (ms)",self.conv_decaytime,self.conv_risetime*1.1,40)
@@ -974,7 +1022,7 @@ class PSCapp(GLFWapp):
             flags|=changed*flag_extract
             if self.psc_threshold:
                 changed,self.psc_threshold=self.slider_float("PSC threshold",self.psc_threshold,
-                                                             0,self.psc_threshold_max,step=self._thrstep)
+                                                             0,min(self.psc_threshold_max,3.4e38),step=self._thrstep)
                 flags|=changed*(flag_extract|flag_filter)
             changed,self.burst_gap_min=imgui.input_float("Max burst gap (s)",self.burst_gap_min)
             self.burst_gap_min=max(0.01,self.burst_gap_min)
@@ -1206,7 +1254,7 @@ class PSCapp(GLFWapp):
             signal.lohifilters[self._filt_tgt]=None
         imgui.same_line()
         if imgui.button("Reset all filters"):
-            for tgt in range(8):
+            for tgt in range(Target.score+1):
                 signal.lohifilters[tgt]=None
         if self._want_shared_filters:
             for tgtsignal in self._signals:
@@ -1273,6 +1321,7 @@ class PSCapp(GLFWapp):
         if implot.begin_plot(f"Selection",ImVec2(-1, imgui.get_font_size() *12)):
             implot.setup_axes_limits(0, self.psc_duration, 0,100,implot.Cond_.once)
             implot.setup_axis_limits_constraints(implot.ImAxis_.x1,0, self.psc_duration)
+            implot.setup_legend(implot.Location_.north_east)
             if _ge_(signal.selected_idx):
                 o=int(signal.psc_onsets[signal.selected_idx])                   
                 l=int(signal.psc_length[signal.selected_idx])
@@ -1414,7 +1463,10 @@ class PSCapp(GLFWapp):
                         pt = imgui.get_mouse_pos()
                         if abs(pt[0]-xy[0])<pixel_pick_radius and abs(pt[1]-xy[1])<pixel_pick_radius:
                             signal.selected_idx=indices[i]
-                    dl.add_circle_filled(xy,pixel_pt_size,imgui.get_color_u32(implot.sample_colormap(scaled[i])))
+                    try:
+                        dl.add_circle_filled(xy,pixel_pt_size,imgui.get_color_u32(implot.sample_colormap(scaled[i])))
+                    except:
+                        pass
                 implot.pop_plot_clip_rect()
             implot.end_plot()
         imgui.end_group()

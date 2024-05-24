@@ -33,7 +33,7 @@ class GLFWapp:
             glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, GL.GL_TRUE)
 
         # Create window with graphics context
-        self.window = glfw.create_window(1440, 768, "TorchPSC", None, None)
+        self.window = glfw.create_window(1440, 768, "Template app", None, None)
         if self.window is None:
             sys.exit(1)
         glfw.set_window_size_callback(self.window,self.on_window_resize)
