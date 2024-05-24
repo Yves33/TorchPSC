@@ -983,7 +983,7 @@ class PSCapp(GLFWapp):
             flags|=changed*(flag_preprocess|flag_rectify|flag_convolve|flag_extract|flag_filter)
             changed,self.savgol_filter=imgui.input_int2('Savgol (npts,deg)',self.savgol_filter)
             flags|=changed*(flag_preprocess|flag_rectify|flag_convolve|flag_extract|flag_filter)
-            self.savgol_filter=(max(0,min(self.savgol_filter[0],20)),
+            self.savgol_filter=(max(0,min(self.savgol_filter[0],200)),
                                 max(0,min(self.savgol_filter[1],4)))
 
         if imgui.collapsing_header("Baseline correction",imgui.TreeNodeFlags_.default_open):
