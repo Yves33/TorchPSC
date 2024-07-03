@@ -68,8 +68,8 @@ Events are extracted each frame. If too many events are extracted (for example, 
 ------------------------------
 + **GUI options:**
   + Use sliders: choose to use slider as inputs instead of text
-  + Show PCA: shows the PCA window (PCA of all extracted events)
-  + Enable voltage traces: by default, the program will reject any file is units is not Amperes (or a multiple). This options enables to load signals even if units is not A.
+  + Show PCA: shows the PCA window (PCA of all extracted events. Only on Linux or WSL2)
+  + Enable voltage traces: by default, the program will reject any file is units is not Amperes (or a multiple). This option enables to load signals even if units is not A.
 + **Filters:**  
   + Low pass: low pass butterworth filter with indicated cutoff frequency.  0 disables the filter
   + Band sop: Band stop filter (iirnotch) to remove electrical interference. 
@@ -150,8 +150,8 @@ Not ready yet. Be patient.
 5-  Limitations and warning:
 ----------------------------
 + This software has been tested with fedora38 / cupy 12.8 
-+ It should theoretically run with cupy 13 (not working on my machine)
-+ It should theoretically work on windows using wsl2 (but not natively)
++ This software has been tested with windows 10 / cupy 13
++ It should theoretically work on windows using wsl2
 + This software is still alpha stage and may crash unexpectedly!
 
 6- Todo:
@@ -160,5 +160,3 @@ Not ready yet. Be patient.
 + Implement machine learning approaches to classify IPSCs/EPSCs (using pytorch, aeon, pyts)
 + Jupyter companion notebook for high quality figure export (cumulative curves, statts per psc / per file)
 + More input file formats through neo-python
-+ Porting to cupy>=13.0
-+ Porting to Windows (should be feasible)

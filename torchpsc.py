@@ -716,7 +716,8 @@ class PSCFrame:
         postpoints=int(0.015*self.sr)
         evts=np.array([cp.asnumpy(self.gpu_rectified[o-prepoints:o+postpoints]) 
                        for o in self.psc_onsets ],dtype=np.float32)
-        with h5py.File(pathlib.Path(self.filename).resolve().with_suffix('.hdf5'), 'w') as f:
+        #with h5py.File("./hdf5/"+str(pathlib.Path(self.filename).resolve().with_suffix('.hdf5')), 'w') as f:
+        with h5py.File('./hdf5/'+pathlib.Path(self.name).stem+'.hdf5', 'w') as f:
             g=f.create_group(self.name)
             ## save arrays
             ## we save original signal (current), the two maskes (enabled and corrected).
@@ -802,27 +803,27 @@ class PSCFrame:
         mask=cp.asnumpy(self.psc_mask.astype(cp.bool_)).astype(np.bool_)
         if len(pscs[mask]):
             r={}
-            r["SYN_evt_ampl_mean"]=np.nanmean(pscs[mask,c_amp_v])*pq.pA
-            r["SYN_evt_ampl_std"]=np.nanstd(pscs[mask,c_amp_v])*pq.pA
-            r["SYN_evt_peak"]=np.nanmean(pscs[mask,c_peak_v])*pq.pA
+            r["SYN2_evt_ampl_mean"]=np.nanmean(pscs[mask,c_amp_v])*pq.pA
+            r["SYN2_evt_ampl_std"]=np.nanstd(pscs[mask,c_amp_v])*pq.pA
+            r["SYN2_evt_peak"]=np.nanmean(pscs[mask,c_peak_v])*pq.pA
             if len(self.psc_inter)>1:
-                r["SYN_evt_inter"]=float(cp.nanmean(self.psc_inter[:-1]))*pq.s
+                r["SYN2_evt_inter"]=float(cp.nanmean(self.psc_inter[:-1]))*pq.s
             else:
-                r["SYN_evt_inter"]=np.nan*pq.s
+                r["SYN2_evt_inter"]=np.nan*pq.s
             ## todo. replace by nan when fit/psc is not complete
             taumask=cp.asnumpy(self.psc_length==cp.max(self.psc_length)).astype(np.bool_)
-            r["SYN_evt_wtc_mean"]=np.nanmean(pscs[mask|taumask,c_tau])/1000*pq.s  ## this one may contain nan
-            r["SYN_evt_wtc_std"]=np.nanstd(pscs[mask|taumask,c_tau])/1000*pq.s    ## this one may contain nan
-            r["SYN_evt_overallfreq"]=np.sum(mask)/(self.t_max-self.t_min)
+            r["SYN2_evt_wtc_mean"]=np.nanmean(pscs[mask|taumask,c_tau])/1000*pq.s  ## this one may contain nan
+            r["SYN2_evt_wtc_std"]=np.nanstd(pscs[mask|taumask,c_tau])/1000*pq.s    ## this one may contain nan
+            r["SYN2_evt_overallfreq"]=np.sum(mask)/(self.t_max-self.t_min)
             ttp,wtc=self._fit_avg_()
-            r["SYN_avgpsc_wtc"]=wtc * pq.s
-            r["SYN_avgpsc_ttp"]=ttp * pq.s
-            r["SYN_evt_fano"]=float(cp.std(self.psc_inter[:-1])/cp.mean(self.psc_inter[:-1]))
-            r["SYN_burst2psc_ratio"]=float(cp.sum(self.burst_counts)/cp.sum(self.psc_mask))
-            r["SYN_burst_content"]=float(cp.mean(self.burst_counts))
-            r["SYN_burst_dura"]=float(cp.mean(self.burst_onoffs[:,1]-self.burst_onoffs[:,0])/self.sr)*pq.s
-            r["SYN_burst_inter"]:float(cp.mean(cp.ediff1d(self.burst_onoffs[:,1])))*pq.s
-            r["SYN_burst_overallfreq"]=len(self.burst_onoffs[:,1])/(self.t_max-self.t_min)
+            r["SYN2_avgpsc_wtc"]=wtc * pq.s
+            r["SYN2_avgpsc_ttp"]=ttp * pq.s
+            r["SYN2_evt_fano"]=float(cp.std(self.psc_inter[:-1])/cp.mean(self.psc_inter[:-1]))
+            r["SYN2_burst2psc_ratio"]=float(cp.sum(self.burst_counts)/cp.sum(self.psc_mask))
+            r["SYN2_burst_content"]=float(cp.mean(self.burst_counts))
+            r["SYN2_burst_dura"]=float(cp.mean(self.burst_onoffs[:,1]-self.burst_onoffs[:,0])/self.sr)*pq.s
+            r["SYN2_burst_inter"]:float(cp.mean(cp.ediff1d(self.burst_onoffs[:,1])))*pq.s
+            r["SYN2_burst_overallfreq"]=len(self.burst_onoffs[:,1])/(self.t_max-self.t_min)
         else:
             r={
                 'SYN_evt_ampl_mean': np.nan*pq.pA,
@@ -841,9 +842,26 @@ class PSCFrame:
                 "SYN_burst_inter":np.nan*pq.s,
                 "SYN_burst_overallfreq":0/pq.s
             }
+        d={}
+        d["SYN2_evt_ampl_mean"]='pA'
+        d["SYN2_evt_ampl_std"]='pA'
+        d["SYN2_evt_peak"]='pA'
+        d["SYN2_evt_inter"]='sec'
+        d["SYN2_evt_wtc_mean"]='sec'  ## this one may contain nan
+        d["SYN2_evt_wtc_std"]='sec'    ## this one may contain nan
+        d["SYN2_evt_overallfreq"]='Hz'
+        d["SYN2_avgpsc_wtc"]='sec'
+        d["SYN2_avgpsc_ttp"]='sec'
+        d["SYN2_evt_fano"]='dimensionless'
+        d["SYN2_burst2psc_ratio"]='dimensionless'
+        d["SYN2_burst_content"]='dimensionless'
+        d["SYN2_burst_dura"]='sec'
+        d["SYN2_burst_inter"]='sec'
+        d["SYN2_burst_overallfreq"]='Hz'
+
         buffer=''
         for k,v in r.items():
-            buffer+=f"{k}\tdimension\t{float(v)}\n"
+            buffer+=f"{k}\t{d[k]}\t{float(v)}\n"
         pyperclip.copy(buffer)
         return r
     
@@ -1021,8 +1039,12 @@ class PSCapp(GLFWapp):
             changed,self.psc_ttp_searchwindow=self.slider_float("PSC max rise time (s)",self.psc_ttp_searchwindow,0.001,0.020)
             flags|=changed*flag_extract
             if self.psc_threshold:
-                changed,self.psc_threshold=self.slider_float("PSC threshold",self.psc_threshold,
-                                                             0,min(self.psc_threshold_max,3.4e38),step=self._thrstep)
+                self.psc_threshold=min(max(self.psc_threshold,-1e27), 1e27) ##quick hack
+                try:
+                    changed,self.psc_threshold=self.slider_float("PSC threshold",self.psc_threshold,
+                                                             0,self.psc_threshold_max,step=self._thrstep)
+                except:
+                    print("buggy")
                 flags|=changed*(flag_extract|flag_filter)
             changed,self.burst_gap_min=imgui.input_float("Max burst gap (s)",self.burst_gap_min)
             self.burst_gap_min=max(0.01,self.burst_gap_min)
@@ -1198,6 +1220,8 @@ class PSCapp(GLFWapp):
                 #changed,self.vcursorpos,a,b,c=implot.drag_line_x(1,self.vcursorpos,ImVec4(1.0,1.0,1.0,1.0))
                 changed,self.psc_threshold,a,b,c=implot.drag_line_y(1,self.psc_threshold,ImVec4(1.0,1.0,1.0,1.0))
                 self.psc_threshold_max=float(cp.max(signal.gpu_convolved))*1.1
+                if np.isnan(self.psc_threshold_max):
+                    self.psc_threshold_max=1000
                 self._flags|=changed*flag_extract
                 implot.end_plot()
         implot.end_subplots()
