@@ -134,8 +134,10 @@ except:
 #from sklearn.preprocessing import RobustScaler,MaxAbsScaler,StandardScaler,MinMaxScaler
 #from sklearn.cluster import KMeans,AgglomerativeClustering
 
-from scipy.optimize import curve_fit
-from scipy.signal import iirnotch,filtfilt,savgol_filter,butter,lfilter
+from scipy.optimize import curve_fit  ## not available from cupy
+## next functions are theoretically available in latest cupy releases
+#from scipy.signal import iirnotch,filtfilt,savgol_filter,butter,lfilter
+from cupyx.scipy.signal import iirnotch,filtfilt,savgol_filter,butter,lfilter
 import h5py
 import pyperclip
 
@@ -381,15 +383,14 @@ class PSCFrame:
         return cls
     
     def preprocess(self):
-        ## todo: should be implemented in hardware!
-        ## neither cusignal nore cupy handle iir filters
-        ## next release of cupy (13.0) should handle butterworth and savgol filters
-        ## better be prepared!
+        ## latest cupy (>13.0) releases implement iirnotch, filtfilt,butter,lfilter,savgol_filter
         if self.flags & flag_preprocess:
-            tmpsignal=self.current.pA
+            #tmpsignal=self.current.pA   ## scipy version
+            tmpsignal=cp.array(self.current.pA).astype(wdtype)  ## cupy version
             if self.p.notch_filter:
-                b_notch, a_notch = iirnotch(50.0, 30, self.sr)
-                tmpsignal=filtfilt(b_notch,a_notch,tmpsignal)
+                fr=50.0 if self.p.notch_filter==1 else 60.0
+                b_notch, a_notch = iirnotch(fr, 30, self.sr)
+                tmpsignal=filtfilt(b_notch,a_notch,tmpsignal).astype(wdtype)
                 '''
                 ##butterworth version
                 bw=0.05
@@ -401,7 +402,6 @@ class PSCFrame:
                 tmpsignal=lfilter(i, u, tmpsignal)'''
             if self.p.lopass_filter:
                 cutoff=lowpass_freqs[self.p.lopass_filter]
-                from scipy.signal import butter, lfilter, freqz
                 b,a=butter(N=6, Wn=cutoff, fs=self.sr, btype='low', analog=False)
                 tmpsignal = lfilter(b, a, tmpsignal)
             if all([s>=2 for s in self.p.savgol_filter]) and self.p.savgol_filter[0]>self.p.savgol_filter[1]:
@@ -1422,6 +1422,10 @@ class PSCapp(GLFWapp):
                             imgui.pop_style_color()
 
     def plotpca(self):
+        if not cuml_available:
+            imgui.text("PCA analysis currently requires cuML/rapidsai")
+            imgui.text("cuML/rapidsai can be installed on linux or windows (using wsl2)")
+            return
         ## could also run an RF classifier on the main features
         signal=self._signals[self._current_signal] if self._current_signal>=0 else None
         #cp.cuda.stream.get_current_stream().synchronize()
