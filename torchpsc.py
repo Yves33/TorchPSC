@@ -34,6 +34,7 @@ default_use_sliders=True        ## use sliders for parameters
 default_savgol=(9,2)            ## parameters for savgol filter
 default_scale_factor=-1.0       ## optional signal scaling, in case your scales are wrong use negative to get upward peaks!
 default_baseline_smooth=1.0     ## duration for baseline average
+default_instant_smooth_method=0 ## smoothing method. can be linear (0) or hanning (1)
 default_instant_smooth=1        ## signal convolution for smoothing. ignored if <2
 default_rectify_method=0        ## keep,abs,rectify default is keep
 default_rms_pts=5               ## number of points for rms rectification
@@ -414,12 +415,21 @@ class PSCFrame:
             npts=int(self.p.baseline_smooth*self.sr)
             self.gpu_rectified=self.gpu_signal*self.p.scale_factor
             if npts>10:
-                self.gpu_rectified=self.gpu_rectified-cp.convolve(self.gpu_rectified,cp.ones(npts,dtype=cp.float32)/(npts), 
-                                                            mode='same')#,method='fft')
+                self.gpu_rectified=self.gpu_rectified-cp.convolve(self.gpu_rectified,
+                                                                  cp.ones(npts,dtype=cp.float32)/(npts),
+                                                                  mode='same')#,method='fft')
             self.gpu_enabled[:npts//2]=0
             self.gpu_enabled[-npts//2:]=0
             if self.p.instant_smooth>1:
-                self.gpu_rectified=cp.convolve(self.gpu_rectified,cp.ones(self.p.instant_smooth,dtype=cp.float32)/(self.p.instant_smooth), 
+                if self.p.instant_smooth_method==1:
+                    conv_window=cp.hanning(self.p.instant_smooth) ## no improvement
+                    self.gpu_rectified=cp.convolve(self.gpu_rectified,
+                                                   conv_window, 
+                                                   mode='same')/cp.sum(conv_window)
+                else:
+                    conv_window=cp.ones(self.p.instant_smooth,dtype=cp.float32)/(self.p.instant_smooth)
+                    self.gpu_rectified=cp.convolve(self.gpu_rectified,
+                                                conv_window, 
                                                 mode='same')#,method='fft')
             match self.p.rectify_method:
                 case Rectify.keep:
@@ -882,6 +892,7 @@ class PSCapp(GLFWapp):
         self.savgol_filter=default_savgol             ## parameters for savgol
         self.scale_factor=default_scale_factor        ## optional signal scaling, in case your scales are wrong!
         self.baseline_smooth=default_baseline_smooth  ## duration for baseline average
+        self.instant_smooth_method=default_instant_smooth_method ## linear or hanning
         self.instant_smooth=default_instant_smooth    ## signal convolution for smoothing
         self.rectify_method=default_rectify_method    ## kee,negate,rectify
         self.rms_pts=default_rms_pts                  ## number of points for rms rectification
@@ -1010,7 +1021,9 @@ class PSCapp(GLFWapp):
             flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
             changed,self.baseline_smooth=self.slider_float("Baseline average",self.baseline_smooth,0.5,10)
             flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
-            changed,self.instant_smooth=self.slider_int("Smooth pts",self.instant_smooth,1,10)
+            changed,self.instant_smooth_method=imgui.combo("Smooth method",self.instant_smooth_method,["linear","hanning"])
+            flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
+            changed,self.instant_smooth=self.slider_int("Smooth pts",self.instant_smooth,1,40)
             flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
             changed,self.rectify_method=imgui.combo("Rectification",self.rectify_method,rectify_method_names)
             flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
@@ -1425,6 +1438,18 @@ class PSCapp(GLFWapp):
         if not cuml_available:
             imgui.text("PCA analysis currently requires cuML/rapidsai")
             imgui.text("cuML/rapidsai can be installed on linux or windows (using wsl2)")
+            ## there are, however, a few directions to be explores:
+            ## principal component analysis from scratch (np,cp)
+            ## https://bagheri365.github.io/blog/Principal-Component-Analysis-from-Scratch/
+            ## https://stackoverflow.com/questions/67932137/implementation-of-principal-component-analysis-from-scratch-orients-the-data-dif
+            ## https://medium.com/technological-singularity/build-a-principal-component-analysis-pca-algorithm-from-scratch-7515595bf08b
+            ## cupoch can do dbscan on GPU
+            ## https://github.com/neka-nat/cupoch/blob/main/examples/python/basic/clustering.py
+            ## DBscan from scratch (iterative. does not use numpy)
+            ## https://scrunts23.medium.com/dbscan-algorithm-from-scratch-in-python-475b82e0571c
+            ## DBscan using faiss-gpu
+            ## https://github.com/karthikv2k/gpu_dbscan/tree/master
+            
             return
         ## could also run an RF classifier on the main features
         signal=self._signals[self._current_signal] if self._current_signal>=0 else None
