@@ -726,8 +726,9 @@ class PSCFrame:
         postpoints=int(0.015*self.sr)
         evts=np.array([cp.asnumpy(self.gpu_rectified[o-prepoints:o+postpoints]) 
                        for o in self.psc_onsets ],dtype=np.float32)
-        #with h5py.File("./hdf5/"+str(pathlib.Path(self.filename).resolve().with_suffix('.hdf5')), 'w') as f:
-        with h5py.File('./hdf5/'+pathlib.Path(self.name).stem+'.hdf5', 'w') as f:
+        if not os.path.isdir("./h5df/"):
+            os.path.mkdir("./h5df/")
+        with h5py.File('./h5df/'+pathlib.Path(self.name).stem+'.h5df', 'w') as f:
             g=f.create_group(self.name)
             ## save arrays
             ## we save original signal (current), the two maskes (enabled and corrected).
@@ -974,7 +975,7 @@ class PSCapp(GLFWapp):
                 if pathlib.Path(f).suffix in ['.smr','.abf']:
                     self._signals.append(PSCFrame.from_experiment(parent=self,filename=f))
                     self._current_signal=len(self._signals)-1
-                elif pathlib.Path(f).suffix in ['.hdf5','.h5py']:
+                elif pathlib.Path(f).suffix in ['.hdf5','.h5py','.h5df']:
                     self._signals.append(PSCFrame.from_hdf(parent=self,filename=f))
                     self._current_signal=len(self._signals)-1
             except:
