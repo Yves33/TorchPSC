@@ -8,13 +8,14 @@
 ##
 ## TODO:
 # - compare with older versions.
-# - import *.itsq files and convert to h5df (not trivial. not that usefull!)
+# - import *.itsq files and convert to hdf5 (not trivial. not that usefull!)
 # - change PCA checkbox to combo None|PCA|UMAP
 # - create CLassifier checkbox HDBScan|GMM
 # - auto threshold button (super-easy)
 # - replace most changed,x=imgui by _,x=imgui. when changed is not used
 # - random forest / cnn classifier aeon, pyts,tslearn?
 # - stumpy template matching. too slow!
+# - implement version key in hdf5 files
 #######################################################
 #######################################################
 ## user settings
@@ -95,10 +96,13 @@ import json
 import time
 import argparse
 import OpenGL.GL as GL
-from imgui_bundle import imgui,implot,ImVec2, ImVec4
-# Always import glfw *after* imgui_bundle
-# (since imgui_bundle will set the correct path where to look for the correct version of the glfw dynamic library)
+## with v1.3, always import glfw *after* imgui_bundle
+## (since imgui_bundle will set the correct path where to look for the correct version of the glfw dynamic library)
+## with version 1.6, glfw must be imported before imgui-bundle
+## unfortunatelly, it is difficult to determine the configuration automatically...
 import glfw
+from imgui_bundle import imgui,implot,ImVec2, ImVec4
+#import glfw
 import numpy as np
 import quantities as pq
 from neo.core import AnalogSignal
@@ -230,7 +234,7 @@ cmd_enable=1
 cmd_disable=2
 cmd_fit_events=3
 cmd_copy=4
-cmd_save_h5df=5
+cmd_save_hdf5=5
 cmd_save_csv=6
 cmd_classify_rf=7
 cmd_add_to_training_set=8 ## takes all events and adds them to training set
@@ -285,7 +289,12 @@ def pygui_timeline(label,pos,lo,hi,active,height_px=4,rightbtn=2,margin=5):
     else:
         handlecolor=imgui.color_convert_float4_to_u32(ImVec4(0.7,0.0,0.0,1.0))
     wori=imgui.get_window_pos()                             ## screen position of window top left
-    wsize = imgui.get_window_content_region_max()           ## actual size of window content (after padding substraction)
+    try:
+        wsize = imgui.get_window_content_region_max() /0          ## actual size of window content (after padding substraction) ! deprecated
+    except: # new api
+        avail_ = imgui.get_content_region_avail()
+        pos_=imgui.get_cursor_pos()
+        wsize=ImVec2(avail_.x+pos_.x,avail_.y+pos_.y)
     wcursor=imgui.get_cursor_pos()                          ## window coordinates of cursor (top left of next widget,including padding)
     height=imgui.get_font_size()+2*style.frame_padding.y    ## height of a standard slider
     width=wsize.x-wcursor.x -2*margin                       ## width of slider to fill window
@@ -726,9 +735,9 @@ class PSCFrame:
         postpoints=int(0.015*self.sr)
         evts=np.array([cp.asnumpy(self.gpu_rectified[o-prepoints:o+postpoints]) 
                        for o in self.psc_onsets ],dtype=np.float32)
-        if not os.path.isdir("./h5df/"):
-            os.path.mkdir("./h5df/")
-        with h5py.File('./h5df/'+pathlib.Path(self.name).stem+'.h5df', 'w') as f:
+        if not os.path.isdir("./hdf5/"):
+            os.path.mkdir("./hdf5/")
+        with h5py.File('./hdf5/'+pathlib.Path(self.name).stem+'.hdf5', 'w') as f:
             g=f.create_group(self.name)
             ## save arrays
             ## we save original signal (current), the two maskes (enabled and corrected).
@@ -1460,7 +1469,7 @@ class PSCapp(GLFWapp):
         imgui.same_line()
         changed,self._pca_cmap=imgui.combo("Colormap",self._pca_cmap,cmap_names)
         imgui.same_line()
-        changed,self._pca_all=imgui.checkbox("All events",self._pca_all)
+        changed,self._pca_all=imgui.checkbox("All events",bool(self._pca_all))
         imgui.pop_item_width()
         if not self._pca_all:
             gpumask=signal.psc_mask.astype(cp.bool_)
@@ -1590,7 +1599,7 @@ class PSCapp(GLFWapp):
 
             if len(self._signals)==0:
                 imgui.begin("info")
-                imgui.text("Dop files on this window to start analysis")
+                imgui.text("Drop files on this window to start analysis")
                 imgui.end()
                 imgui.pop_font()
                 imgui.render()

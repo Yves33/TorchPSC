@@ -1,10 +1,12 @@
 import sys
 import platform
 import OpenGL.GL as GL
-from imgui_bundle import imgui,implot,ImVec2, ImVec4
-# Always import glfw *after* imgui_bundle
-# (since imgui_bundle will set the correct path where to look for the correct version of the glfw dynamic library)
+## with v1.3, always import glfw *after* imgui_bundle
+## (since imgui_bundle will set the correct path where to look for the correct version of the glfw dynamic library)
+## with version 1.6, glfw must be imported before imgui-bundle
 import glfw
+from imgui_bundle import imgui,implot,ImVec2, ImVec4
+#import glfw
 import ctypes
 
 def glfw_error_callback(error: int, description: str):
@@ -71,7 +73,7 @@ class GLFWapp:
             imgui.backends.opengl3_new_frame()
             imgui.backends.glfw_new_frame()
             imgui.new_frame()
-            #imgui.push_font(self.roboto )
+            imgui.push_font(self.roboto )
             imgui.show_demo_window(True)
             imgui.pop_font()
             imgui.render()
@@ -96,3 +98,8 @@ class GLFWapp:
         imgui.destroy_context()
         glfw.destroy_window(self.window)
         glfw.terminate()
+
+if __name__=='__main__':
+    app=GLFWapp()
+    app.run()
+    app.cleanup()
