@@ -36,6 +36,7 @@ default_savgol=(9,2)            ## parameters for savgol filter
 default_scale_factor=-1.0       ## optional signal scaling, in case your scales are wrong use negative to get upward peaks!
 default_baseline_smooth=1.0     ## duration for baseline average
 default_instant_smooth_method=0 ## smoothing method. can be linear (0) or hanning (1)
+default_baseline_enable=True    ## enable/disable baseline correction
 default_instant_smooth=1        ## signal convolution for smoothing. ignored if <2
 default_rectify_method=0        ## keep,abs,rectify default is keep
 default_rms_pts=5               ## number of points for rms rectification
@@ -89,6 +90,7 @@ default_clusterer={"name":"HDBSCAN",
 debug={'enable':False,
        'break':False}
 
+default_font_size=14
 ####################
 ####################
 from enum import IntEnum
@@ -423,7 +425,7 @@ class PSCFrame:
         if self.flags & flag_rectify:
             npts=int(self.p.baseline_smooth*self.sr)
             self.gpu_rectified=self.gpu_signal*self.p.scale_factor
-            if npts>10:
+            if npts>10 and self.p.baseline_enable:
                 self.gpu_rectified=self.gpu_rectified-cp.convolve(self.gpu_rectified,
                                                                   cp.ones(npts,dtype=cp.float32)/(npts),
                                                                   mode='same')#,method='fft')
@@ -902,6 +904,7 @@ class PSCapp(GLFWapp):
         self.savgol_filter=default_savgol             ## parameters for savgol
         self.scale_factor=default_scale_factor        ## optional signal scaling, in case your scales are wrong!
         self.baseline_smooth=default_baseline_smooth  ## duration for baseline average
+        self.baseline_enable=default_baseline_enable  ## enable baseline correction
         self.instant_smooth_method=default_instant_smooth_method ## linear or hanning
         self.instant_smooth=default_instant_smooth    ## signal convolution for smoothing
         self.rectify_method=default_rectify_method    ## kee,negate,rectify
@@ -958,7 +961,7 @@ class PSCapp(GLFWapp):
         self._cumul_tgt=0
         self._cumul_bins=300
         self._pca_cmap=default_cmap
-        self._show_pca=default_show_pca
+        self._show_pca=default_show_pca and cuml_available
 
         ## dimensionality reduction and clusterering
         if cuml_available:
@@ -1009,7 +1012,11 @@ class PSCapp(GLFWapp):
         cmds=0x00  ## we have no command
         if imgui.collapsing_header("GUI options"):
             _,self._want_sliders=imgui.checkbox("Use sliders",self._want_sliders)
+            if not cuml_available:
+                imgui.begin_disabled()
             _,self._show_pca=imgui.checkbox("Show PCA",self._show_pca)
+            if not cuml_available:
+                imgui.end_disabled()
             _,self._V2A=imgui.checkbox("Enable voltage traces",self._V2A)
             if debug["enable"]:
                 _,debug['break']=imgui.checkbox("Break",debug['break'])
@@ -1028,6 +1035,8 @@ class PSCapp(GLFWapp):
         if imgui.collapsing_header("Baseline correction",imgui.TreeNodeFlags_.default_open):
             ## baseline correction
             changed,self.scale_factor=imgui.input_float("Scale factor",self.scale_factor)
+            flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
+            changed, self.baseline_enable=imgui.checkbox("Skip baseline correction",self.baseline_enable)
             flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
             changed,self.baseline_smooth=self.slider_float("Baseline average",self.baseline_smooth,0.5,10)
             flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
@@ -1588,7 +1597,7 @@ class PSCapp(GLFWapp):
             imgui.backends.opengl3_new_frame()
             imgui.backends.glfw_new_frame()
             imgui.new_frame()
-            imgui.push_font(self.roboto )
+            imgui.push_font(self.roboto,default_font_size )
             
             signal=self._signals[self._current_signal] if len(self._signals) and self._current_signal>=0 else None  ## in case we changed the signal!
             ## each iteration, we process the signal if something has changed
