@@ -503,8 +503,8 @@ class PSCFrame:
             ## extract pscs in visible region.
             ## should move everything to one big array.
             ## self.pscprops=cp.zeros((10,len(self.psc_onsets)))
-            _cnt=cp.array([int(self.sr*self.p.psc_duration)])
-            _cnt2=cp.array([int(self.sr*self.p.psc_ttp_searchwindow)])
+            _cnt=cp.array([int(self.sr*self.p.psc_duration)])[0]
+            _cnt2=cp.array([int(self.sr*self.p.psc_ttp_searchwindow)])[0]
             self.psc_onsets   = argrelextrema(cp.clip(self.gpu_convolved,self.p.psc_threshold,None), cp.greater, order=7)[0]
             #self.psc_onsets = detect_peaks(cp.clip(self.gpu_convolved,self.p.psc_threshold,None),1.0) ## slower
             _valids           = self.gpu_enabled[self.psc_onsets]
