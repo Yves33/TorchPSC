@@ -34,6 +34,7 @@ default_use_sliders=True        ## use sliders for parameters
 ## signal preprocessing
 default_savgol=(9,2)            ## parameters for savgol filter
 default_scale_factor=-1.0       ## optional signal scaling, in case your scales are wrong use negative to get upward peaks!
+default_baseline_offset=0.0     ## optional offset, specifically usefull if you want constant baseline correction
 default_baseline_smooth=1.0     ## duration for baseline average
 default_instant_smooth_method=0 ## smoothing method. can be linear (0) or hanning (1)
 default_baseline_enable=True    ## enable/disable baseline correction
@@ -424,7 +425,7 @@ class PSCFrame:
     def rectify(self):
         if self.flags & flag_rectify:
             npts=int(self.p.baseline_smooth*self.sr)
-            self.gpu_rectified=self.gpu_signal*self.p.scale_factor
+            self.gpu_rectified=(self.gpu_signal*self.p.scale_factor)-self.p.baseline_offset
             if npts>10 and self.p.baseline_enable:
                 self.gpu_rectified=self.gpu_rectified-cp.convolve(self.gpu_rectified,
                                                                   cp.ones(npts,dtype=cp.float32)/(npts),
@@ -458,8 +459,9 @@ class PSCFrame:
                     self.gpu_rectified=cp.sqrt(cp.convolve(sqsignal, window,mode='same')).astype(cp.float32)#,method='fft'))
             
             ## rms and abs may introduce a shift in baseline. we need to recenter!, by substracting the median or convolving (but slower)
-            #self.gpu_rectified-=cp.median(self.gpu_rectified)
-            self.gpu_rectified-=cp.mean(self.gpu_rectified)
+            if self.p.rectify_method in [Rectify.rms,Rectify.abs]:
+                #self.gpu_rectified-=cp.median(self.gpu_rectified)
+                self.gpu_rectified-=cp.mean(self.gpu_rectified)
             self.a_min=float(cp.min(self.gpu_rectified))
             self.a_max=float(cp.max(self.gpu_rectified))
         self.flags=self.flags & ~flag_rectify ## clear rectify flag and return
@@ -903,6 +905,7 @@ class PSCapp(GLFWapp):
         self.lopass_filter=0                          ## choice for lopass (0,1500,2000,2500,4000Hz)                    
         self.savgol_filter=default_savgol             ## parameters for savgol
         self.scale_factor=default_scale_factor        ## optional signal scaling, in case your scales are wrong!
+        self.baseline_offset=default_baseline_offset  ## offset value
         self.baseline_smooth=default_baseline_smooth  ## duration for baseline average
         self.baseline_enable=default_baseline_enable  ## enable baseline correction
         self.instant_smooth_method=default_instant_smooth_method ## linear or hanning
@@ -1036,7 +1039,9 @@ class PSCapp(GLFWapp):
             ## baseline correction
             changed,self.scale_factor=imgui.input_float("Scale factor",self.scale_factor)
             flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
-            changed, self.baseline_enable=imgui.checkbox("Skip baseline correction",self.baseline_enable)
+            changed,self.baseline_offset=imgui.input_float("Baseline offset",self.baseline_offset)
+            flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
+            changed, self.baseline_enable=imgui.checkbox("Dynamic correction",self.baseline_enable)
             flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
             changed,self.baseline_smooth=self.slider_float("Baseline average",self.baseline_smooth,0.5,10)
             flags|=changed*(flag_rectify|flag_convolve|flag_extract|flag_filter)
