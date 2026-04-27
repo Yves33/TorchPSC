@@ -14,7 +14,7 @@ Torchpsc uses CUPY to filter, extract and analyse PSC (post synaptic events). De
 + numpy (CPU side computations)
 + scipy (curve_fit, iirnotch, filtfilt, savgol_filter) (till these are implemented in cupy...)
 + h5py to save the results
-+ pypeclip to quickly copy summary
++ pyperclip to quickly copy summary
 + python-neo
 + pyOpenGL
 + imgui-bundle (many thanks to the authors!)

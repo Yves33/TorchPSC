@@ -73,7 +73,7 @@ class GLFWapp:
             imgui.backends.opengl3_new_frame()
             imgui.backends.glfw_new_frame()
             imgui.new_frame()
-            imgui.push_font(self.roboto )
+            imgui.push_font(self.roboto,12 )
             imgui.show_demo_window(True)
             imgui.pop_font()
             imgui.render()
